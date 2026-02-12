@@ -49,8 +49,32 @@ pub fn detect_circles(
     circle_arr.fill(0);
     let (height, width) = contour_arr.dim();
     let circles = hough_transform(contour_arr.view(), circle_cache, vote_thresh);
-
     for circle in &circles {
+        let focal_length: f64 = 480.0;
+        let offset: f64 = -59.0 + 12.7;
+        let width_pix: f64 = width as f64;
+        let height_pix: f64 = height as f64;
+        let fov_x: f64 = 75.0;
+        let fov_y: f64 = 40.0;
+        let deg_to_rad: f64 = 0.01745329251;
+        let ball_radius: f64 = 75.0;
+        let cam_coords_distance: f64 = (ball_radius * focal_length) / circle.radius as f64;
+        let distance: f64 = cam_coords_distance;
+        let centered_scaled_x: f64 = (circle.x as f64 - width_pix/2.0)/(width_pix/2.0);
+        let centered_scaled_y: f64 = (-(circle.y as f64) + height_pix/2.0)/(height_pix/2.0);
+        let angle_x: f64 = centered_scaled_x * (fov_x / 2.0) * deg_to_rad;
+        let angle_y: f64 = centered_scaled_y * (fov_y / 2.0) * deg_to_rad;
+        let x_true: f64 = distance * (angle_x.sin() / angle_x.cos());
+        let y_true: f64 = distance * (angle_y.sin() / angle_y.cos());
+        let z_true: f64 = distance  + offset;
+        tracing::info!("ball:");
+        tracing::info!("x: {}", x_true  / 25.4);
+        tracing::info!("y: {}", y_true  / 25.4);
+        tracing::info!("z: {}", z_true  / 25.4);
+ 
+
+
+
         if let Some(circle_points) = circle_cache.get(&circle.radius) {
             for &(c_x, c_y) in circle_points {
                 let x = circle.x as i32 + c_x;
