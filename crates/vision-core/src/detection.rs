@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::vec;
 
 use ndarray::{Array2, ArrayView2, Zip};
 use vision_detection::ball::hough_transform;
@@ -45,10 +46,11 @@ pub fn detect_circles(
     circle_arr: &mut Array2<u8>,
     circle_cache: &HashMap<u32, Vec<(i32, i32)>>,
     vote_thresh: u32,
-) {
+) -> Vec<(f64,f64,f64)> {
     circle_arr.fill(0);
     let (height, width) = contour_arr.dim();
     let circles = hough_transform(contour_arr.view(), circle_cache, vote_thresh);
+    let mut positions: Vec<(f64,f64,f64)> = Vec::new();
     for circle in &circles {
         let focal_length: f64 = 480.0;
         let offset: f64 = -59.0 + 12.7;
@@ -67,12 +69,11 @@ pub fn detect_circles(
         let x_true: f64 = distance * (angle_x.sin() / angle_x.cos());
         let y_true: f64 = distance * (angle_y.sin() / angle_y.cos());
         let z_true: f64 = distance  + offset;
-        tracing::info!("ball:");
-        tracing::info!("x: {}", x_true  / 25.4);
-        tracing::info!("y: {}", y_true  / 25.4);
-        tracing::info!("z: {}", z_true  / 25.4);
- 
-
+        //tracing::info!("ball position (inches):");
+        positions.push((x_true,y_true,z_true));
+        //tracing::info!("x: {}", x_true  / 25.4);
+        //tracing::info!("y: {}", y_true  / 25.4);
+        //tracing::info!("z: {}", z_true  / 25.4);
 
 
         if let Some(circle_points) = circle_cache.get(&circle.radius) {
@@ -85,4 +86,5 @@ pub fn detect_circles(
             }
         }
     }
+    positions 
 }

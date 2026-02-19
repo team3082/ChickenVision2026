@@ -7,8 +7,12 @@ use config::Config;
 use ndarray::Array2;
 use std::time::Duration;
 use tokio::time::Instant;
+use tokio::runtime::Runtime;
 use vision_detection::circle::precompute_circle_points;
-
+use serde_json;
+use std::net::{Ipv4Addr, SocketAddrV4};
+pub use network_tables::v4::subscription::SubscriptionOptions;
+//pub use network_tables::*;
 use crate::{
     camera::{capture_frame, get_camera, resize_array},
     detection::{detect_circles, detect_contours, run_color_mask},
@@ -19,6 +23,7 @@ use crate::{
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_thread_ids(true)
+        .with_env_filter("debug,network_tables=debug")
         .with_thread_names(true)
         .init();
     tracing::info!("RustyVision waking up...");
@@ -28,7 +33,17 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!(error = %e, "Using default configuration");
         Config::default()
     });
-
+    // Initialize networktables
+    let client = network_tables::v4::Client::try_new_w_config(
+        //SocketAddrV4::new(Ipv4Addr::new(10, 30, 82, 2), 5810),
+        SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5810),
+        network_tables::v4::client_config::Config {
+            ..Default::default()
+        },
+    ).await?;
+    let published_topic = client
+        .publish_topic("/YellowOrbs", network_tables::v4::Type::Json, None)
+        .await?;
     // Create FrameHubs for streaming
 
     let mask_hub = FrameHub::new();
@@ -50,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
     let height = config.camera.height as usize;
     let proc_width = width / resize_factor;
     let proc_height = height / resize_factor;
-
+    let rt  = Runtime::new().expect("Failed to create Tokio runtime");
     // Run vision processing in blocking task
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         let mut camera = get_camera(vision_state.config.blocking_read().camera.device_id)?;
@@ -74,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
 
         let mut frame_counter = 0u32;
         let mut last_log = Instant::now();
-
+        let task_client = client.clone();
         loop {
             // --- CONFIG UPDATE CHECK ---
             {
@@ -119,13 +134,16 @@ async fn main() -> anyhow::Result<()> {
                 current_detection.min_area / (resize_factor * resize_factor) as f32,
             );
 
-            detect_circles(
+            let positions: Vec<(f64,f64,f64)> = detect_circles(
                 contour_arr.view(),
                 &mut circle_arr,
                 &circle_cache,
                 current_detection.vote_thresh,
             );
 
+            // --- Publish to networktables
+            let publishError = rt.block_on(publish(positions, task_client.clone(), published_topic.clone()));
+            
             // --- PUBLISH TO DASHBOARD ---
 
             if vision_state.mask_frames.has_subscribers() {
@@ -155,5 +173,13 @@ async fn main() -> anyhow::Result<()> {
         }
     })
     .await??;
+    Ok(())
+}
+
+async fn publish( positions: Vec<(f64,f64,f64)>, task_client: network_tables::v4::Client, published_topic: network_tables::v4::PublishedTopic) -> anyhow::Result<()> {
+    let json_data = serde_json::to_string(&positions)?;
+    task_client.publish_value(&published_topic, &network_tables::Value::from(json_data))
+        .await
+        .unwrap();
     Ok(())
 }
